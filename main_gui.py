@@ -46,7 +46,15 @@ class App:
         settings_frame = ttk.Frame(parent, padding="10")
         settings_frame.pack(side=tk.RIGHT, fill=tk.Y)
 
-        ttk.Label(settings_frame, text="角色外观 (Profile):").pack(pady=(0, 5), anchor="w")
+        # --- 视图模式 ---
+        ttk.Label(settings_frame, text="视图模式 (View Mode):").pack(pady=(0, 5), anchor="w")
+        self.view_mode_var = tk.StringVar(value="Animation View")
+        animation_radio = ttk.Radiobutton(settings_frame, text="动画视图", variable=self.view_mode_var, value="Animation View", command=self.on_view_mode_change)
+        animation_radio.pack(anchor="w")
+        debug_radio = ttk.Radiobutton(settings_frame, text="视频骨骼预览", variable=self.view_mode_var, value="Debug View", command=self.on_view_mode_change)
+        debug_radio.pack(anchor="w")
+
+        ttk.Label(settings_frame, text="角色外观 (Profile):").pack(pady=(20, 5), anchor="w")
         self.profile_var = tk.StringVar()
         profile_combobox = ttk.Combobox(settings_frame, textvariable=self.profile_var, state="readonly")
         profile_combobox['values'] = list(CHARACTER_PROFILES.keys())
@@ -99,6 +107,10 @@ class App:
         imgtk = ImageTk.PhotoImage(image=img)
         self.preview_label.imgtk = imgtk
         self.preview_label.configure(image=imgtk)
+
+    def on_view_mode_change(self):
+        mode = self.view_mode_var.get()
+        self.settings_queue.put({"view_mode": mode})
 
     def on_profile_select(self, event=None):
         profile_name = self.profile_var.get()

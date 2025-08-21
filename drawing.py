@@ -57,15 +57,18 @@ def draw_character(canvas, keypoints, profile, confidence_threshold=0.5):
             head_color = profile.get("head", {}).get("color", (255, 255, 255))
             cv2.circle(canvas, center, head_radius, head_color, -1)
 
-def draw_hud(canvas, is_recording, profile_name, bg_name):
+def draw_hud(canvas, is_recording, profile_name, bg_name, view_mode):
     """在屏幕上绘制HUD信息（状态和帮助）。"""
     # 录制状态
     rec_status = "REC" if is_recording else "IDLE"
     rec_color = (0, 0, 255) if is_recording else (0, 255, 0)
-    cv2.putText(canvas, f"STATUS: {rec_status}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, rec_color, 2)
 
-    # 其他信息
-    info_text_1 = f"Profile: {profile_name} [c] | BG: {bg_name} [b]"
-    info_text_2 = "Record: [r] | Quit: [q]"
-    cv2.putText(canvas, info_text_1, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    cv2.putText(canvas, info_text_2, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    # 为了避免文字重叠，我们稍微重新组织一下HUD
+    y_pos = 30
+    cv2.putText(canvas, f"STATUS: {rec_status}", (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.7, rec_color, 2)
+    y_pos += 30
+    cv2.putText(canvas, f"View Mode: {view_mode}", (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    y_pos += 30
+    cv2.putText(canvas, f"Profile: {profile_name}", (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    y_pos += 30
+    cv2.putText(canvas, f"Background: {bg_name}", (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
