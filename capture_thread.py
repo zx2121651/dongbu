@@ -23,26 +23,22 @@ class CaptureThread(threading.Thread):
         self.settings_queue = settings_queue
         self._stop_event = threading.Event()
         self.model = YOLO("yolo11n-pose.pt")
+        self.last_known_poses = {} # 用于存储每个跟踪ID的最后姿态
         print("后台线程：YOLOv8模型已加载。")
 
     def stop(self):
-        """发送停止信号给线程。"""
         self._stop_event.set()
 
     def run(self):
-        """线程的主执行循环。"""
-        # --- 初始化 ---
-        is_recording = False # 录制功能暂未在GUI中实现
+        is_recording = False
         video_writer = None
 
-        # 初始化默认设置
-        profile_names = list(CHARACTER_PROFILES.keys())
-        current_profile_name = profile_names[0]
+        current_profile_name = list(CHARACTER_PROFILES.keys())[0]
         backgrounds = ["black", "blue"]
         current_bg_name = backgrounds[0]
         current_confidence_threshold = 0.5
+        smoothing_alpha = 0.3 # 插值系数 (lerp alpha)
 
-        # 尝试加载自定义背景
         if cv2.os.path.exists("background.jpg"):
             custom_bg = cv2.imread("background.jpg")
             backgrounds.append("custom")
@@ -56,40 +52,51 @@ class CaptureThread(threading.Thread):
             if custom_bg is not None:
                 custom_bg = cv2.resize(custom_bg, (monitor_width, monitor_height))
 
-            # --- 主循环 ---
             while not self._stop_event.is_set():
-                # --- 检查来自GUI的设置更新 ---
                 if not self.settings_queue.empty():
                     settings = self.settings_queue.get()
                     current_profile_name = settings.get("profile", current_profile_name)
                     current_bg_name = settings.get("background", current_bg_name)
                     current_confidence_threshold = settings.get("confidence_threshold", current_confidence_threshold)
+                    smoothing_alpha = settings.get("smoothing_alpha", smoothing_alpha)
 
-                # --- 设置当前帧的画布 ---
                 current_profile = CHARACTER_PROFILES[current_profile_name]
-                if current_bg_name == "black":
-                    animation_canvas = np.zeros((monitor_height, monitor_width, 3), dtype=np.uint8)
-                elif current_bg_name == "blue":
-                    animation_canvas = np.full((monitor_height, monitor_width, 3), (139, 0, 0), dtype=np.uint8)
-                elif current_bg_name == "custom" and custom_bg is not None:
-                    animation_canvas = custom_bg.copy()
-                else: # Fallback
-                    animation_canvas = np.zeros((monitor_height, monitor_width, 3), dtype=np.uint8)
+                if current_bg_name == "black": canvas = np.zeros((monitor_height, monitor_width, 3), dtype=np.uint8)
+                elif current_bg_name == "blue": canvas = np.full((monitor_height, monitor_width, 3), (139, 0, 0), dtype=np.uint8)
+                elif current_bg_name == "custom" and custom_bg is not None: canvas = custom_bg.copy()
+                else: canvas = np.zeros((monitor_height, monitor_width, 3), dtype=np.uint8)
 
-                # --- 核心处理逻辑 ---
                 sct_img = sct.grab(monitor)
                 img_bgr = cv2.cvtColor(np.array(sct_img), cv2.COLOR_BGRA2BGR)
-                results = self.model(img_bgr, stream=True, verbose=False, conf=current_confidence_threshold)
 
-                for r in results:
-                    for person_keypoints in r.keypoints.data.cpu().numpy():
-                        draw_character(animation_canvas, person_keypoints, current_profile, confidence_threshold=current_confidence_threshold)
+                results = self.model.track(img_bgr, persist=True, verbose=False, conf=current_confidence_threshold)
 
-                # --- 绘制UI ---
-                draw_hud(animation_canvas, is_recording, current_profile_name, current_bg_name)
+                track_ids = results[0].boxes.id
+                all_keypoints = results[0].keypoints.data.cpu().numpy()
 
-                # --- 将结果放入队列 ---
+                current_frame_ids = set()
+
+                if track_ids is not None:
+                    for i, person_keypoints in enumerate(all_keypoints):
+                        track_id = int(track_ids[i])
+                        current_frame_ids.add(track_id)
+
+                        if track_id in self.last_known_poses:
+                            smoothed_kpts = self.last_known_poses[track_id] * (1 - smoothing_alpha) + person_keypoints * smoothing_alpha
+                        else:
+                            smoothed_kpts = person_keypoints
+
+                        self.last_known_poses[track_id] = smoothed_kpts
+
+                        draw_character(canvas, smoothed_kpts, current_profile, confidence_threshold=current_confidence_threshold)
+
+                stale_ids = set(self.last_known_poses.keys()) - current_frame_ids
+                for stale_id in stale_ids:
+                    del self.last_known_poses[stale_id]
+
+                draw_hud(canvas, is_recording, current_profile_name, current_bg_name)
+
                 if self.frame_queue.qsize() < 2:
-                    self.frame_queue.put(animation_canvas)
+                    self.frame_queue.put(canvas)
 
         print("后台线程：已停止。")

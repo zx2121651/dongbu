@@ -66,13 +66,21 @@ class App:
         background_combobox.pack(fill=tk.X)
         background_combobox.bind("<<ComboboxSelected>>", self.on_background_select)
 
-        # --- 置信度阈值滑块 ---
         ttk.Label(settings_frame, text="置信度阈值 (Confidence):").pack(pady=(20, 5), anchor="w")
         self.confidence_var = tk.DoubleVar(value=0.5)
         self.confidence_label = ttk.Label(settings_frame, text=f"{self.confidence_var.get():.2f}")
         self.confidence_label.pack()
         confidence_slider = ttk.Scale(settings_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL, variable=self.confidence_var, command=self.on_threshold_change)
         confidence_slider.pack(fill=tk.X)
+
+        # --- 平滑度控制滑块 ---
+        ttk.Label(settings_frame, text="动画平滑度 (Smoothness):").pack(pady=(20, 5), anchor="w")
+        self.smoothness_var = tk.DoubleVar(value=0.7) # 对应 alpha=0.3
+        self.smoothness_label = ttk.Label(settings_frame, text=f"{self.smoothness_var.get():.2f}")
+        self.smoothness_label.pack()
+        smoothness_slider = ttk.Scale(settings_frame, from_=0.0, to=0.95, orient=tk.HORIZONTAL, variable=self.smoothness_var, command=self.on_smoothness_change)
+        smoothness_slider.pack(fill=tk.X)
+
 
         ttk.Label(settings_frame, text="外观预览:").pack(pady=(20, 5), anchor="w")
         self.preview_label = ttk.Label(settings_frame, background="black")
@@ -106,6 +114,13 @@ class App:
         threshold = self.confidence_var.get()
         self.confidence_label.config(text=f"{threshold:.2f}")
         self.settings_queue.put({"confidence_threshold": threshold})
+
+    def on_smoothness_change(self, value):
+        smoothness = self.smoothness_var.get()
+        self.smoothness_label.config(text=f"{smoothness:.2f}")
+        # 平滑度越高，alpha越小，姿态变化越慢
+        alpha = 1.0 - smoothness
+        self.settings_queue.put({"smoothing_alpha": alpha})
 
     def update_frame(self):
         try:
