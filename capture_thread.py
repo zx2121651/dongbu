@@ -17,10 +17,11 @@ from drawing import draw_character, draw_hud
 from config import CHARACTER_PROFILES
 
 class CaptureThread(threading.Thread):
-    def __init__(self, frame_queue, settings_queue):
+    def __init__(self, frame_queue, settings_queue, capture_region=None):
         super().__init__(daemon=True)
         self.frame_queue = frame_queue
         self.settings_queue = settings_queue
+        self.capture_region = capture_region
         self._stop_event = threading.Event()
         self.model = YOLO("yolo11n-pose.pt")
         self.last_known_poses = {}
@@ -33,13 +34,13 @@ class CaptureThread(threading.Thread):
         is_recording = False
         video_writer = None
 
-        # --- 初始化默认设置 ---
         current_profile_name = list(CHARACTER_PROFILES.keys())[0]
         backgrounds = ["black", "blue"]
         current_bg_name = backgrounds[0]
         current_confidence_threshold = 0.5
         smoothing_alpha = 0.3
         current_view_mode = "Animation View"
+        fps = 20.0 # 用于录制
 
         if cv2.os.path.exists("background.jpg"):
             custom_bg = cv2.imread("background.jpg")
@@ -48,14 +49,14 @@ class CaptureThread(threading.Thread):
             custom_bg = None
 
         with mss.mss() as sct:
-            monitor = sct.monitors[1]
+            # 如果没有指定区域，则使用主显示器
+            monitor = self.capture_region if self.capture_region is not None else sct.monitors[1]
             monitor_width, monitor_height = monitor["width"], monitor["height"]
 
             if custom_bg is not None:
                 custom_bg = cv2.resize(custom_bg, (monitor_width, monitor_height))
 
             while not self._stop_event.is_set():
-                # --- 获取最新设置 ---
                 if not self.settings_queue.empty():
                     settings = self.settings_queue.get()
                     current_profile_name = settings.get("profile", current_profile_name)
@@ -64,23 +65,29 @@ class CaptureThread(threading.Thread):
                     smoothing_alpha = settings.get("smoothing_alpha", smoothing_alpha)
                     current_view_mode = settings.get("view_mode", current_view_mode)
 
-                # --- 核心处理 ---
+                    if "is_recording" in settings:
+                        is_recording = settings["is_recording"]
+                        if is_recording and video_writer is None:
+                            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                            video_writer = cv2.VideoWriter("output.mp4", fourcc, fps, (monitor_width, monitor_height))
+                            print("后台线程：开始录制...")
+                        elif not is_recording and video_writer is not None:
+                            video_writer.release()
+                            video_writer = None
+                            print("后台线程：停止录制。")
+
                 sct_img = sct.grab(monitor)
                 img_bgr = cv2.cvtColor(np.array(sct_img), cv2.COLOR_BGRA2BGR)
                 results = self.model.track(img_bgr, persist=True, verbose=False, conf=current_confidence_threshold)
 
-                # --- 根据视图模式选择画布 ---
                 if current_view_mode == "Debug View":
-                    # 直接在原始图像上绘制骨骼
                     output_frame = results[0].plot()
-                else: # "Animation View"
-                    # 创建动画画布
+                else:
                     if current_bg_name == "black": canvas = np.zeros((monitor_height, monitor_width, 3), dtype=np.uint8)
                     elif current_bg_name == "blue": canvas = np.full((monitor_height, monitor_width, 3), (139, 0, 0), dtype=np.uint8)
                     elif current_bg_name == "custom" and custom_bg is not None: canvas = custom_bg.copy()
                     else: canvas = np.zeros((monitor_height, monitor_width, 3), dtype=np.uint8)
 
-                    # 绘制平滑后的角色
                     track_ids = results[0].boxes.id
                     all_keypoints = results[0].keypoints.data.cpu().numpy()
                     current_frame_ids = set()
@@ -99,9 +106,14 @@ class CaptureThread(threading.Thread):
                     for stale_id in stale_ids: del self.last_known_poses[stale_id]
                     output_frame = canvas
 
-                # --- 绘制HUD并发送到GUI ---
                 draw_hud(output_frame, is_recording, current_profile_name, current_bg_name, current_view_mode)
+
+                if is_recording and video_writer is not None:
+                    video_writer.write(output_frame)
+
                 if self.frame_queue.qsize() < 2:
                     self.frame_queue.put(output_frame)
 
+        if video_writer is not None:
+            video_writer.release()
         print("后台线程：已停止。")

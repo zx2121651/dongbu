@@ -18,6 +18,7 @@ import numpy as np
 from capture_thread import CaptureThread
 from config import CHARACTER_PROFILES, SAMPLE_KEYPOINTS
 from drawing import draw_character
+from roi_selector import ROISelector
 
 class App:
     def __init__(self, root):
@@ -25,11 +26,13 @@ class App:
         self.root.title("动画桌面捕捉 v2.0")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
+        self.capture_region = None # None means full screen
+        self.is_recording = False
         self.frame_queue = queue.Queue()
         self.settings_queue = queue.Queue()
+        self.capture_thread = None
 
-        self.capture_thread = CaptureThread(self.frame_queue, self.settings_queue)
-        self.capture_thread.start()
+        self.start_capture_thread()
 
         main_frame = ttk.Frame(self.root)
         main_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
@@ -42,12 +45,27 @@ class App:
         self.update_frame()
         self.update_preview()
 
+    def start_capture_thread(self):
+        if self.capture_thread and self.capture_thread.is_alive():
+            self.capture_thread.stop()
+            self.capture_thread.join(timeout=1)
+        self.capture_thread = CaptureThread(self.frame_queue, self.settings_queue, self.capture_region)
+        self.capture_thread.start()
+        print("主GUI：捕捉线程已启动。")
+
     def create_settings_panel(self, parent):
         settings_frame = ttk.Frame(parent, padding="10")
         settings_frame.pack(side=tk.RIGHT, fill=tk.Y)
 
+        # --- 区域选择 ---
+        ttk.Label(settings_frame, text="捕捉区域 (Capture Area):").pack(pady=(0, 5), anchor="w")
+        roi_button = ttk.Button(settings_frame, text="选择捕捉区域", command=self.open_roi_selector)
+        roi_button.pack(fill=tk.X)
+        reset_roi_button = ttk.Button(settings_frame, text="重置为全屏", command=self.reset_roi)
+        reset_roi_button.pack(fill=tk.X, pady=(5,0))
+
         # --- 视图模式 ---
-        ttk.Label(settings_frame, text="视图模式 (View Mode):").pack(pady=(0, 5), anchor="w")
+        ttk.Label(settings_frame, text="视图模式 (View Mode):").pack(pady=(20, 5), anchor="w")
         self.view_mode_var = tk.StringVar(value="Animation View")
         animation_radio = ttk.Radiobutton(settings_frame, text="动画视图", variable=self.view_mode_var, value="Animation View", command=self.on_view_mode_change)
         animation_radio.pack(anchor="w")
@@ -65,10 +83,8 @@ class App:
         ttk.Label(settings_frame, text="背景 (Background):").pack(pady=(20, 5), anchor="w")
         self.background_var = tk.StringVar()
         background_combobox = ttk.Combobox(settings_frame, textvariable=self.background_var, state="readonly")
-
         backgrounds = ["black", "blue"]
         if os.path.exists("background.jpg"): backgrounds.append("custom")
-
         background_combobox['values'] = backgrounds
         background_combobox.current(0)
         background_combobox.pack(fill=tk.X)
@@ -81,18 +97,38 @@ class App:
         confidence_slider = ttk.Scale(settings_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL, variable=self.confidence_var, command=self.on_threshold_change)
         confidence_slider.pack(fill=tk.X)
 
-        # --- 平滑度控制滑块 ---
         ttk.Label(settings_frame, text="动画平滑度 (Smoothness):").pack(pady=(20, 5), anchor="w")
-        self.smoothness_var = tk.DoubleVar(value=0.7) # 对应 alpha=0.3
+        self.smoothness_var = tk.DoubleVar(value=0.7)
         self.smoothness_label = ttk.Label(settings_frame, text=f"{self.smoothness_var.get():.2f}")
         self.smoothness_label.pack()
         smoothness_slider = ttk.Scale(settings_frame, from_=0.0, to=0.95, orient=tk.HORIZONTAL, variable=self.smoothness_var, command=self.on_smoothness_change)
         smoothness_slider.pack(fill=tk.X)
 
-
         ttk.Label(settings_frame, text="外观预览:").pack(pady=(20, 5), anchor="w")
         self.preview_label = ttk.Label(settings_frame, background="black")
         self.preview_label.pack(fill=tk.BOTH, expand=True)
+
+        self.record_button = ttk.Button(settings_frame, text="开始录制", command=self.toggle_recording)
+        self.record_button.pack(pady=20, fill=tk.X)
+
+    def open_roi_selector(self):
+        self.root.withdraw() # 隐藏主窗口
+        self.roi_selector = ROISelector(self.root, self.roi_selection_callback)
+
+    def reset_roi(self):
+        self.roi_selection_callback(None)
+
+    def roi_selection_callback(self, roi):
+        print(f"主GUI：收到新的ROI区域: {roi}")
+        self.capture_region = roi
+        self.root.deiconify() # 重新显示主窗口
+        self.start_capture_thread()
+
+    def toggle_recording(self):
+        self.is_recording = not self.is_recording
+        self.settings_queue.put({"is_recording": self.is_recording})
+        if self.is_recording: self.record_button.config(text="停止录制")
+        else: self.record_button.config(text="开始录制")
 
     def update_preview(self, profile_name=None):
         if profile_name is None: profile_name = self.profile_var.get()
@@ -130,7 +166,6 @@ class App:
     def on_smoothness_change(self, value):
         smoothness = self.smoothness_var.get()
         self.smoothness_label.config(text=f"{smoothness:.2f}")
-        # 平滑度越高，alpha越小，姿态变化越慢
         alpha = 1.0 - smoothness
         self.settings_queue.put({"smoothing_alpha": alpha})
 
