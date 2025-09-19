@@ -13,7 +13,7 @@ import numpy as np
 import cv2
 import time
 from ultralytics import YOLO
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
 from drawing import draw_character, draw_hud
 from config import CHARACTER_PROFILES
@@ -29,7 +29,7 @@ class CaptureWorker(QObject):
         self.model_name = model_name
         self._is_running = True
 
-        # --- Settings ---
+        # --- Default Settings ---
         self.current_profile_name = list(CHARACTER_PROFILES.keys())[0]
         self.current_bg_name = "black"
         self.current_confidence_threshold = 0.5
@@ -42,8 +42,41 @@ class CaptureWorker(QObject):
         self.pose_filters = {}
         print(f"工作线程：YOLOv8模型 {self.model_name} 已加载。")
 
+    # --- Public Slots for settings ---
+    @pyqtSlot(str)
+    def set_view_mode(self, mode):
+        self.current_view_mode = mode
+
+    @pyqtSlot(str)
+    def set_profile(self, profile_name):
+        self.current_profile_name = profile_name
+
+    @pyqtSlot(str)
+    def set_background(self, bg_name):
+        self.current_bg_name = bg_name
+
+    @pyqtSlot(float)
+    def set_confidence_threshold(self, threshold):
+        self.current_confidence_threshold = threshold
+
+    @pyqtSlot(float)
+    def set_min_cutoff(self, min_cutoff):
+        self.min_cutoff = min_cutoff
+        self.pose_filters.clear()
+
+    @pyqtSlot(float)
+    def set_beta(self, beta):
+        self.beta = beta
+        self.pose_filters.clear()
+
+    @pyqtSlot(bool)
+    def set_recording(self, is_recording):
+        self.is_recording = is_recording
+
     def run(self):
-        """线程的主执行循环。"""
+        video_writer = None
+        fps = 20.0
+
         if cv2.os.path.exists("background.jpg"):
             custom_bg = cv2.imread("background.jpg")
         else:
@@ -57,6 +90,16 @@ class CaptureWorker(QObject):
                 custom_bg = cv2.resize(custom_bg, (monitor_width, monitor_height))
 
             while self._is_running:
+                # --- Video Writer Management ---
+                if self.is_recording and video_writer is None:
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    video_writer = cv2.VideoWriter("output.mp4", fourcc, fps, (monitor_width, monitor_height))
+                    print("工作线程：开始录制...")
+                elif not self.is_recording and video_writer is not None:
+                    video_writer.release()
+                    video_writer = None
+                    print("工作线程：停止录制。")
+
                 t0 = time.time()
                 sct_img = sct.grab(monitor)
                 img_bgr = cv2.cvtColor(np.array(sct_img), cv2.COLOR_BGRA2BGR)
@@ -99,8 +142,13 @@ class CaptureWorker(QObject):
 
                 draw_hud(output_frame, self.is_recording, self.current_profile_name, self.current_bg_name, self.current_view_mode)
 
+                if self.is_recording and video_writer is not None:
+                    video_writer.write(output_frame)
+
                 self.frame_ready.emit(output_frame)
 
+        if video_writer is not None:
+            video_writer.release()
         self.finished.emit()
         print("工作线程：已停止。")
 
