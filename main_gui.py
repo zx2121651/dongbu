@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 
 """
-主GUI应用程序模块
+主GUI应用程序模块 (CustomTkinter版)
 
-该文件使用Tkinter创建主应用程序窗口，
+该文件使用CustomTkinter创建主应用程序窗口，
 并管理后台的捕捉线程。
 """
 
+import customtkinter as ctk
 import tkinter as tk
-from tkinter import ttk
 from PIL import Image, ImageTk
 import queue
 import cv2
@@ -20,13 +20,19 @@ from config import CHARACTER_PROFILES, SAMPLE_KEYPOINTS
 from drawing import draw_character
 from roi_selector import ROISelector
 
-class App:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("动画桌面捕捉 v2.0")
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+# 设置App主题
+ctk.set_appearance_mode("Dark")
+ctk.set_default_color_theme("blue")
 
-        self.capture_region = None # None means full screen
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+
+        self.title("动画桌面捕捉 v3.0")
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.geometry("1200x720")
+
+        self.capture_region = None
         self.selected_model = "yolo11n-pose.pt"
         self.is_recording = False
         self.frame_queue = queue.Queue()
@@ -35,17 +41,23 @@ class App:
 
         self.start_capture_thread()
 
-        main_frame = ttk.Frame(self.root)
-        main_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+        # --- GUI 布局 ---
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-        self.video_label = ttk.Label(main_frame)
-        self.video_label.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.main_frame = ctk.CTkFrame(self)
+        self.main_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        self.main_frame.grid_columnconfigure(0, weight=1)
+        self.main_frame.grid_columnconfigure(1, weight=0) # Settings panel should not expand
+        self.main_frame.grid_rowconfigure(0, weight=1)
 
-        self.create_settings_panel(main_frame)
+        self.video_label = ctk.CTkLabel(self.main_frame, text="正在启动...")
+        self.video_label.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+
+        self.create_settings_panel(self.main_frame)
 
         self.update_frame()
         self.update_preview()
-        # Initial send of filter params
         self.on_filter_param_change(None)
 
     def start_capture_thread(self):
@@ -62,99 +74,93 @@ class App:
         print(f"主GUI：捕捉线程已启动 (模型: {self.selected_model})。")
 
     def create_settings_panel(self, parent):
-        settings_frame = ttk.Frame(parent, padding="10")
-        settings_frame.pack(side=tk.RIGHT, fill=tk.Y)
+        settings_frame = ctk.CTkScrollableFrame(parent, label_text="设置面板")
+        settings_frame.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="ns")
+        settings_frame.grid_columnconfigure(0, weight=1)
 
-        ttk.Label(settings_frame, text="捕捉区域 (Capture Area):").pack(pady=(0, 5), anchor="w")
-        roi_button = ttk.Button(settings_frame, text="选择捕捉区域", command=self.open_roi_selector)
-        roi_button.pack(fill=tk.X)
-        reset_roi_button = ttk.Button(settings_frame, text="重置为全屏", command=self.reset_roi)
-        reset_roi_button.pack(fill=tk.X, pady=(5,0))
+        # --- 捕捉与模型设置 ---
+        capture_frame = ctk.CTkFrame(settings_frame)
+        capture_frame.pack(fill=tk.X, pady=(5, 10))
+        capture_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(capture_frame, text="捕捉与模型", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, pady=5, sticky="w")
 
-        ttk.Label(settings_frame, text="检测模型 (Model):").pack(pady=(20, 5), anchor="w")
-        self.model_var = tk.StringVar(value=self.selected_model)
-        model_combobox = ttk.Combobox(settings_frame, textvariable=self.model_var, state="readonly")
-        model_combobox['values'] = ['yolo11n-pose.pt', 'yolo11s-pose.pt', 'yolo11m-pose.pt']
-        model_combobox.pack(fill=tk.X)
-        model_combobox.bind("<<ComboboxSelected>>", self.on_model_select)
+        ctk.CTkButton(capture_frame, text="选择捕捉区域", command=self.open_roi_selector).grid(row=1, column=0, sticky="ew", padx=5)
+        ctk.CTkButton(capture_frame, text="重置为全屏", command=self.reset_roi).grid(row=2, column=0, sticky="ew", padx=5, pady=(5,0))
 
-        ttk.Label(settings_frame, text="视图模式 (View Mode):").pack(pady=(20, 5), anchor="w")
-        self.view_mode_var = tk.StringVar(value="Animation View")
-        animation_radio = ttk.Radiobutton(settings_frame, text="动画视图", variable=self.view_mode_var, value="Animation View", command=self.on_view_mode_change)
-        animation_radio.pack(anchor="w")
-        debug_radio = ttk.Radiobutton(settings_frame, text="视频骨骼预览", variable=self.view_mode_var, value="Debug View", command=self.on_view_mode_change)
-        debug_radio.pack(anchor="w")
+        self.model_var = ctk.StringVar(value=self.selected_model)
+        ctk.CTkComboBox(capture_frame, variable=self.model_var, state="readonly",
+                        values=['yolo11n-pose.pt', 'yolo11s-pose.pt', 'yolo11m-pose.pt'],
+                        command=self.on_model_select).grid(row=3, column=0, sticky="ew", padx=5, pady=10)
 
-        ttk.Label(settings_frame, text="角色外观 (Profile):").pack(pady=(20, 5), anchor="w")
-        self.profile_var = tk.StringVar()
-        profile_combobox = ttk.Combobox(settings_frame, textvariable=self.profile_var, state="readonly")
-        profile_combobox['values'] = list(CHARACTER_PROFILES.keys())
-        profile_combobox.current(0)
-        profile_combobox.pack(fill=tk.X)
-        profile_combobox.bind("<<ComboboxSelected>>", self.on_profile_select)
+        # --- 外观与视图设置 ---
+        appearance_frame = ctk.CTkFrame(settings_frame)
+        appearance_frame.pack(fill=tk.X, pady=10)
+        appearance_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(appearance_frame, text="外观与视图", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, pady=5, sticky="w")
 
-        ttk.Label(settings_frame, text="背景 (Background):").pack(pady=(20, 5), anchor="w")
-        self.background_var = tk.StringVar()
-        background_combobox = ttk.Combobox(settings_frame, textvariable=self.background_var, state="readonly")
-        backgrounds = ["black", "blue"]
-        if os.path.exists("background.jpg"): backgrounds.append("custom")
-        background_combobox['values'] = backgrounds
-        background_combobox.current(0)
-        background_combobox.pack(fill=tk.X)
-        background_combobox.bind("<<ComboboxSelected>>", self.on_background_select)
+        self.view_mode_var = ctk.StringVar(value="Animation View")
+        ctk.CTkRadioButton(appearance_frame, text="动画视图", variable=self.view_mode_var, value="Animation View", command=self.on_view_mode_change).grid(row=1, column=0, sticky="w", padx=10)
+        ctk.CTkRadioButton(appearance_frame, text="视频骨骼预览", variable=self.view_mode_var, value="Debug View", command=self.on_view_mode_change).grid(row=2, column=0, sticky="w", padx=10)
 
-        ttk.Label(settings_frame, text="置信度阈值 (Confidence):").pack(pady=(20, 5), anchor="w")
+        self.profile_var = ctk.StringVar()
+        ctk.CTkComboBox(appearance_frame, variable=self.profile_var, state="readonly",
+                        values=list(CHARACTER_PROFILES.keys()), command=self.on_profile_select).grid(row=3, column=0, sticky="ew", padx=5, pady=10)
+
+        # --- 效果与参数调整 ---
+        params_frame = ctk.CTkFrame(settings_frame)
+        params_frame.pack(fill=tk.X, pady=10)
+        params_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(params_frame, text="效果与参数", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=2, pady=5, sticky="w")
+
+        ctk.CTkLabel(params_frame, text="置信度:").grid(row=1, column=0, sticky="w", padx=5)
         self.confidence_var = tk.DoubleVar(value=0.5)
-        self.confidence_label = ttk.Label(settings_frame, text=f"{self.confidence_var.get():.2f}")
-        self.confidence_label.pack()
-        confidence_slider = ttk.Scale(settings_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL, variable=self.confidence_var, command=self.on_threshold_change)
-        confidence_slider.pack(fill=tk.X)
+        self.confidence_label = ctk.CTkLabel(params_frame, text=f"{self.confidence_var.get():.2f}", width=40)
+        self.confidence_label.grid(row=1, column=2)
+        ctk.CTkSlider(params_frame, from_=0.0, to=1.0, variable=self.confidence_var, command=self.on_threshold_change).grid(row=1, column=1, sticky="ew")
 
-        # --- 1-Euro Filter 参数 ---
-        ttk.Label(settings_frame, text="滤波器最小截止频率 (Min Cutoff):").pack(pady=(20, 5), anchor="w")
+        ctk.CTkLabel(params_frame, text="Min Cutoff:").grid(row=2, column=0, sticky="w", padx=5)
         self.min_cutoff_var = tk.DoubleVar(value=1.0)
-        self.min_cutoff_label = ttk.Label(settings_frame, text=f"{self.min_cutoff_var.get():.2f}")
-        self.min_cutoff_label.pack()
-        min_cutoff_slider = ttk.Scale(settings_frame, from_=0.1, to=2.0, orient=tk.HORIZONTAL, variable=self.min_cutoff_var, command=self.on_filter_param_change)
-        min_cutoff_slider.pack(fill=tk.X)
+        self.min_cutoff_label = ctk.CTkLabel(params_frame, text=f"{self.min_cutoff_var.get():.2f}", width=40)
+        self.min_cutoff_label.grid(row=2, column=2)
+        ctk.CTkSlider(params_frame, from_=0.1, to=2.0, variable=self.min_cutoff_var, command=self.on_filter_param_change).grid(row=2, column=1, sticky="ew")
 
-        ttk.Label(settings_frame, text="滤波器Beta (Speed Coeff):").pack(pady=(10, 5), anchor="w")
+        ctk.CTkLabel(params_frame, text="Beta:").grid(row=3, column=0, sticky="w", padx=5)
         self.beta_var = tk.DoubleVar(value=0.7)
-        self.beta_label = ttk.Label(settings_frame, text=f"{self.beta_var.get():.2f}")
-        self.beta_label.pack()
-        beta_slider = ttk.Scale(settings_frame, from_=0.0, to=1.5, orient=tk.HORIZONTAL, variable=self.beta_var, command=self.on_filter_param_change)
-        beta_slider.pack(fill=tk.X)
+        self.beta_label = ctk.CTkLabel(params_frame, text=f"{self.beta_var.get():.2f}", width=40)
+        self.beta_label.grid(row=3, column=2)
+        ctk.CTkSlider(params_frame, from_=0.0, to=1.5, variable=self.beta_var, command=self.on_filter_param_change).grid(row=3, column=1, sticky="ew")
 
-        ttk.Label(settings_frame, text="外观预览:").pack(pady=(20, 5), anchor="w")
-        self.preview_label = ttk.Label(settings_frame, background="black")
+        # --- 预览和录制 ---
+        preview_frame = ctk.CTkFrame(settings_frame)
+        preview_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        ctk.CTkLabel(preview_frame, text="外观预览").pack()
+        self.preview_label = ctk.CTkLabel(preview_frame, text="")
         self.preview_label.pack(fill=tk.BOTH, expand=True)
 
-        self.record_button = ttk.Button(settings_frame, text="开始录制", command=self.toggle_recording)
-        self.record_button.pack(pady=20, fill=tk.X)
+        self.record_button = ctk.CTkButton(settings_frame, text="开始录制", command=self.toggle_recording)
+        self.record_button.pack(pady=10, fill=tk.X)
 
     def open_roi_selector(self):
-        self.root.withdraw()
-        self.roi_selector = ROISelector(self.root, self.roi_selection_callback)
+        self.withdraw()
+        self.roi_selector = ROISelector(self, self.roi_selection_callback)
 
     def reset_roi(self):
         self.roi_selection_callback(None)
 
     def roi_selection_callback(self, roi):
-        print(f"主GUI：收到新的ROI区域: {roi}")
         self.capture_region = roi
-        self.root.deiconify()
+        self.deiconify()
         self.start_capture_thread()
 
-    def on_model_select(self, event=None):
-        self.selected_model = self.model_var.get()
-        print(f"主GUI：请求切换模型为: {self.selected_model}")
+    def on_model_select(self, model_name):
+        self.selected_model = model_name
         self.start_capture_thread()
 
     def toggle_recording(self):
         self.is_recording = not self.is_recording
         self.settings_queue.put({"is_recording": self.is_recording})
-        if self.is_recording: self.record_button.config(text="停止录制")
-        else: self.record_button.config(text="开始录制")
+        if self.is_recording: self.record_button.configure(text="停止录制", fg_color="red")
+        else: self.record_button.configure(text="开始录制", fg_color=ctk.ThemeManager.theme["CTkButton"]["fg_color"])
 
     def update_preview(self, profile_name=None):
         if profile_name is None: profile_name = self.profile_var.get()
@@ -166,58 +172,48 @@ class App:
         scaled_kpts[:, 1] *= preview_h
         draw_character(preview_canvas, scaled_kpts, profile)
         img = Image.fromarray(cv2.cvtColor(preview_canvas, cv2.COLOR_BGR2RGB))
-        imgtk = ImageTk.PhotoImage(image=img)
-        self.preview_label.imgtk = imgtk
+        imgtk = ctk.CTkImage(light_image=img, dark_image=img, size=(preview_w, preview_h))
         self.preview_label.configure(image=imgtk)
 
     def on_view_mode_change(self):
         mode = self.view_mode_var.get()
         self.settings_queue.put({"view_mode": mode})
 
-    def on_profile_select(self, event=None):
-        profile_name = self.profile_var.get()
-        if profile_name:
-            self.settings_queue.put({"profile": profile_name})
-            self.update_preview(profile_name)
+    def on_profile_select(self, profile_name):
+        self.settings_queue.put({"profile": profile_name})
+        self.update_preview(profile_name)
 
-    def on_background_select(self, event=None):
-        bg_name = self.background_var.get()
-        if bg_name: self.settings_queue.put({"background": bg_name})
+    def on_background_select(self, bg_name):
+        self.settings_queue.put({"background": bg_name})
 
     def on_threshold_change(self, value):
-        threshold = self.confidence_var.get()
-        self.confidence_label.config(text=f"{threshold:.2f}")
-        self.settings_queue.put({"confidence_threshold": threshold})
+        self.confidence_label.configure(text=f"{value:.2f}")
+        self.settings_queue.put({"confidence_threshold": value})
 
     def on_filter_param_change(self, value):
         min_cutoff = self.min_cutoff_var.get()
         beta = self.beta_var.get()
-        self.min_cutoff_label.config(text=f"{min_cutoff:.2f}")
-        self.beta_label.config(text=f"{beta:.2f}")
+        self.min_cutoff_label.configure(text=f"{min_cutoff:.2f}")
+        self.beta_label.configure(text=f"{beta:.2f}")
         self.settings_queue.put({"min_cutoff": min_cutoff, "beta": beta})
 
     def update_frame(self):
         try:
             frame = self.frame_queue.get_nowait()
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(frame_rgb)
-            label_width, label_height = self.video_label.winfo_width(), self.video_label.winfo_height()
-            if label_width > 1 and label_height > 1: img.thumbnail((label_width, label_height), Image.Resampling.LANCZOS)
-            imgtk = ImageTk.PhotoImage(image=img)
-            self.video_label.imgtk = imgtk
-            self.video_label.configure(image=imgtk)
+            img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            imgtk = ctk.CTkImage(light_image=img, dark_image=img, size=(frame.shape[1], frame.shape[0]))
+            self.video_label.configure(image=imgtk, text="")
         except queue.Empty:
             pass
         finally:
-            self.root.after(15, self.update_frame)
+            self.after(15, self.update_frame)
 
     def on_closing(self):
         print("主GUI：正在关闭应用程序...")
         self.capture_thread.stop()
         self.capture_thread.join(timeout=2)
-        self.root.destroy()
+        self.destroy()
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = App(root)
-    root.mainloop()
+    app = App()
+    app.mainloop()
