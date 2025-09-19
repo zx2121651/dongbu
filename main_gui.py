@@ -27,6 +27,7 @@ class App:
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         self.capture_region = None # None means full screen
+        self.selected_model = "yolo11n-pose.pt"
         self.is_recording = False
         self.frame_queue = queue.Queue()
         self.settings_queue = queue.Queue()
@@ -44,27 +45,39 @@ class App:
 
         self.update_frame()
         self.update_preview()
+        # Initial send of filter params
+        self.on_filter_param_change(None)
 
     def start_capture_thread(self):
         if self.capture_thread and self.capture_thread.is_alive():
             self.capture_thread.stop()
             self.capture_thread.join(timeout=1)
-        self.capture_thread = CaptureThread(self.frame_queue, self.settings_queue, self.capture_region)
+        self.capture_thread = CaptureThread(
+            frame_queue=self.frame_queue,
+            settings_queue=self.settings_queue,
+            capture_region=self.capture_region,
+            model_name=self.selected_model
+        )
         self.capture_thread.start()
-        print("主GUI：捕捉线程已启动。")
+        print(f"主GUI：捕捉线程已启动 (模型: {self.selected_model})。")
 
     def create_settings_panel(self, parent):
         settings_frame = ttk.Frame(parent, padding="10")
         settings_frame.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # --- 区域选择 ---
         ttk.Label(settings_frame, text="捕捉区域 (Capture Area):").pack(pady=(0, 5), anchor="w")
         roi_button = ttk.Button(settings_frame, text="选择捕捉区域", command=self.open_roi_selector)
         roi_button.pack(fill=tk.X)
         reset_roi_button = ttk.Button(settings_frame, text="重置为全屏", command=self.reset_roi)
         reset_roi_button.pack(fill=tk.X, pady=(5,0))
 
-        # --- 视图模式 ---
+        ttk.Label(settings_frame, text="检测模型 (Model):").pack(pady=(20, 5), anchor="w")
+        self.model_var = tk.StringVar(value=self.selected_model)
+        model_combobox = ttk.Combobox(settings_frame, textvariable=self.model_var, state="readonly")
+        model_combobox['values'] = ['yolo11n-pose.pt', 'yolo11s-pose.pt', 'yolo11m-pose.pt']
+        model_combobox.pack(fill=tk.X)
+        model_combobox.bind("<<ComboboxSelected>>", self.on_model_select)
+
         ttk.Label(settings_frame, text="视图模式 (View Mode):").pack(pady=(20, 5), anchor="w")
         self.view_mode_var = tk.StringVar(value="Animation View")
         animation_radio = ttk.Radiobutton(settings_frame, text="动画视图", variable=self.view_mode_var, value="Animation View", command=self.on_view_mode_change)
@@ -97,12 +110,20 @@ class App:
         confidence_slider = ttk.Scale(settings_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL, variable=self.confidence_var, command=self.on_threshold_change)
         confidence_slider.pack(fill=tk.X)
 
-        ttk.Label(settings_frame, text="动画平滑度 (Smoothness):").pack(pady=(20, 5), anchor="w")
-        self.smoothness_var = tk.DoubleVar(value=0.7)
-        self.smoothness_label = ttk.Label(settings_frame, text=f"{self.smoothness_var.get():.2f}")
-        self.smoothness_label.pack()
-        smoothness_slider = ttk.Scale(settings_frame, from_=0.0, to=0.95, orient=tk.HORIZONTAL, variable=self.smoothness_var, command=self.on_smoothness_change)
-        smoothness_slider.pack(fill=tk.X)
+        # --- 1-Euro Filter 参数 ---
+        ttk.Label(settings_frame, text="滤波器最小截止频率 (Min Cutoff):").pack(pady=(20, 5), anchor="w")
+        self.min_cutoff_var = tk.DoubleVar(value=1.0)
+        self.min_cutoff_label = ttk.Label(settings_frame, text=f"{self.min_cutoff_var.get():.2f}")
+        self.min_cutoff_label.pack()
+        min_cutoff_slider = ttk.Scale(settings_frame, from_=0.1, to=2.0, orient=tk.HORIZONTAL, variable=self.min_cutoff_var, command=self.on_filter_param_change)
+        min_cutoff_slider.pack(fill=tk.X)
+
+        ttk.Label(settings_frame, text="滤波器Beta (Speed Coeff):").pack(pady=(10, 5), anchor="w")
+        self.beta_var = tk.DoubleVar(value=0.7)
+        self.beta_label = ttk.Label(settings_frame, text=f"{self.beta_var.get():.2f}")
+        self.beta_label.pack()
+        beta_slider = ttk.Scale(settings_frame, from_=0.0, to=1.5, orient=tk.HORIZONTAL, variable=self.beta_var, command=self.on_filter_param_change)
+        beta_slider.pack(fill=tk.X)
 
         ttk.Label(settings_frame, text="外观预览:").pack(pady=(20, 5), anchor="w")
         self.preview_label = ttk.Label(settings_frame, background="black")
@@ -112,7 +133,7 @@ class App:
         self.record_button.pack(pady=20, fill=tk.X)
 
     def open_roi_selector(self):
-        self.root.withdraw() # 隐藏主窗口
+        self.root.withdraw()
         self.roi_selector = ROISelector(self.root, self.roi_selection_callback)
 
     def reset_roi(self):
@@ -121,7 +142,12 @@ class App:
     def roi_selection_callback(self, roi):
         print(f"主GUI：收到新的ROI区域: {roi}")
         self.capture_region = roi
-        self.root.deiconify() # 重新显示主窗口
+        self.root.deiconify()
+        self.start_capture_thread()
+
+    def on_model_select(self, event=None):
+        self.selected_model = self.model_var.get()
+        print(f"主GUI：请求切换模型为: {self.selected_model}")
         self.start_capture_thread()
 
     def toggle_recording(self):
@@ -163,11 +189,12 @@ class App:
         self.confidence_label.config(text=f"{threshold:.2f}")
         self.settings_queue.put({"confidence_threshold": threshold})
 
-    def on_smoothness_change(self, value):
-        smoothness = self.smoothness_var.get()
-        self.smoothness_label.config(text=f"{smoothness:.2f}")
-        alpha = 1.0 - smoothness
-        self.settings_queue.put({"smoothing_alpha": alpha})
+    def on_filter_param_change(self, value):
+        min_cutoff = self.min_cutoff_var.get()
+        beta = self.beta_var.get()
+        self.min_cutoff_label.config(text=f"{min_cutoff:.2f}")
+        self.beta_label.config(text=f"{beta:.2f}")
+        self.settings_queue.put({"min_cutoff": min_cutoff, "beta": beta})
 
     def update_frame(self):
         try:
