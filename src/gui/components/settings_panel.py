@@ -27,7 +27,11 @@ class SettingsPanel(QWidget):
     def create_capture_group(self, group):
         layout = QVBoxLayout(group)
         model_combo = QComboBox()
-        model_combo.addItems(['yolo11n-pose.pt', 'yolo11s-pose.pt', 'yolo11m-pose.pt', 'mediapipe-pose'])
+        model_combo.addItems([
+            'yolo11n-pose.pt', 'yolo11s-pose.pt', 'yolo11m-pose.pt',
+            'yolo26n-pose.pt', 'yolo26s-pose.pt', 'yolo26m-pose.pt',
+            'mediapipe-pose'
+        ])
         model_combo.setCurrentText(self.settings.get("model", "yolo11n-pose.pt"))
         model_combo.currentTextChanged.connect(self.main.on_model_select)
         layout.addWidget(QLabel("模型:"))
