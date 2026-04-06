@@ -27,13 +27,23 @@ class SettingsPanel(QWidget):
     def create_capture_group(self, group):
         layout = QVBoxLayout(group)
         model_combo = QComboBox()
-        model_combo.addItems([
-            'yolo11n-pose.pt', 'yolo11s-pose.pt', 'yolo11m-pose.pt',
-            'yolo26n-pose.pt', 'yolo26s-pose.pt', 'yolo26m-pose.pt',
-            'mediapipe-pose'
-        ])
-        model_combo.setCurrentText(self.settings.get("model", "yolo11n-pose.pt"))
-        model_combo.currentTextChanged.connect(self.main.on_model_select)
+        model_combo.addItem("单人捕捉 (MediaPipe)", "mediapipe-pose")
+        model_combo.addItem("多人捕捉 (YOLO26-N)", "yolo26n-pose.pt")
+        model_combo.addItem("多人捕捉 (YOLO26-S)", "yolo26s-pose.pt")
+        model_combo.addItem("多人捕捉 (YOLO11)", "yolo11n-pose.pt")
+
+        # 寻找对应的 index
+        current_model = self.settings.get("model", "yolo26n-pose.pt")
+        index = model_combo.findData(current_model)
+        if index != -1:
+            model_combo.setCurrentIndex(index)
+
+        def on_combo_changed(idx):
+            data = model_combo.itemData(idx)
+            if data:
+                self.main.on_model_select(data)
+
+        model_combo.currentIndexChanged.connect(on_combo_changed)
         layout.addWidget(QLabel("模型:"))
         layout.addWidget(model_combo)
 
