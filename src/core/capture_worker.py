@@ -1,26 +1,15 @@
-# -*- coding: utf-8 -*-
-
-"""
-捕捉与处理线程模块 (PyQt6版)
-
-该文件定义了在后台运行的核心工作QObject。
-它负责屏幕捕捉、姿态估计和图像绘制，
-并通过PyQt的信号机制将最终的图像帧发送出去。
-"""
-
 import mss
 import numpy as np
 import cv2
-import os
 import time
-import queue
-import threading
+import os
 from ultralytics import YOLO
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
-from drawing import draw_character, draw_hud
-from config import CHARACTER_PROFILES
-from one_euro_filter import OneEuroFilter
+from src.utils.drawing import draw_character
+from src.utils.config import CHARACTER_PROFILES
+from src.utils.filters import OneEuroFilter
+from src.core.recorder import VideoRecorder
 
 class CaptureWorker(QObject):
     frame_ready = pyqtSignal(np.ndarray)
@@ -32,7 +21,6 @@ class CaptureWorker(QObject):
         self.model_name = model_name
         self._is_running = True
 
-        # --- Default Settings ---
         self.current_profile_name = list(CHARACTER_PROFILES.keys())[0]
         self.current_bg_name = "black"
         self.current_confidence_threshold = 0.5
@@ -40,57 +28,39 @@ class CaptureWorker(QObject):
         self.min_cutoff = 1.0
         self.beta = 0.7
         self.is_recording = False
+
         self.custom_bg_reload_requested = False
 
         self.model = YOLO(self.model_name)
         self.pose_filters = {}
-
-        # --- Recording Thread Variables ---
-        self.record_queue = queue.Queue(maxsize=100)
-        self.record_thread = None
-        self.record_running = False
-        print(f"工作线程：YOLOv8模型 {self.model_name} 已加载。")
-
-    # --- Public Slots for settings ---
-    @pyqtSlot(str)
-    def set_view_mode(self, mode):
-        self.current_view_mode = mode
+        self.recorder = None
 
     @pyqtSlot(str)
-    def set_profile(self, profile_name):
-        self.current_profile_name = profile_name
-
+    def set_view_mode(self, mode): self.current_view_mode = mode
+    @pyqtSlot(str)
+    def set_profile(self, profile_name): self.current_profile_name = profile_name
     @pyqtSlot(str)
     def set_background(self, bg_name):
         self.current_bg_name = bg_name
-        self.custom_bg_reload_requested = True
-
+        if bg_name == "custom":
+            self.custom_bg_reload_requested = True
     @pyqtSlot(float)
-    def set_confidence_threshold(self, threshold):
-        self.current_confidence_threshold = threshold
-
+    def set_confidence_threshold(self, threshold): self.current_confidence_threshold = threshold
     @pyqtSlot(float)
     def set_min_cutoff(self, min_cutoff):
         self.min_cutoff = min_cutoff
         self.pose_filters.clear()
-
     @pyqtSlot(float)
     def set_beta(self, beta):
         self.beta = beta
         self.pose_filters.clear()
-
     @pyqtSlot(bool)
-    def set_recording(self, is_recording):
-        self.is_recording = is_recording
+    def set_recording(self, is_recording): self.is_recording = is_recording
 
     def run(self):
-        video_writer = None
-        fps = 20.0
-
+        custom_bg = None
         if os.path.exists("background.jpg"):
             custom_bg = cv2.imread("background.jpg")
-        else:
-            custom_bg = None
 
         with mss.mss() as sct:
             monitor = self.capture_region if self.capture_region is not None else sct.monitors[1]
@@ -99,24 +69,20 @@ class CaptureWorker(QObject):
             if custom_bg is not None:
                 custom_bg = cv2.resize(custom_bg, (monitor_width, monitor_height))
 
+            self.recorder = VideoRecorder(resolution=(monitor_width, monitor_height))
+
             while self._is_running:
                 if self.custom_bg_reload_requested:
                     if os.path.exists("background.jpg"):
-                        custom_bg = cv2.imread("background.jpg")
-                        if custom_bg is not None:
-                            custom_bg = cv2.resize(custom_bg, (monitor_width, monitor_height))
+                        new_bg = cv2.imread("background.jpg")
+                        if new_bg is not None:
+                            custom_bg = cv2.resize(new_bg, (monitor_width, monitor_height))
                     self.custom_bg_reload_requested = False
 
-                # --- Video Writer Management ---
-                if self.is_recording and not self.record_running:
-                    self.record_running = True
-                    self.record_thread = threading.Thread(target=self._record_worker, args=(fps, monitor_width, monitor_height))
-                    self.record_thread.start()
-                elif not self.is_recording and self.record_running:
-                    self.record_running = False
-                    if self.record_thread is not None:
-                        self.record_thread.join()
-                        self.record_thread = None
+                if self.is_recording and not self.recorder.is_recording:
+                    self.recorder.start()
+                elif not self.is_recording and self.recorder.is_recording:
+                    self.recorder.stop()
 
                 t0 = time.time()
                 sct_img = sct.grab(monitor)
@@ -158,37 +124,15 @@ class CaptureWorker(QObject):
                         del self.pose_filters[stale_id]
                     output_frame = canvas
 
-                draw_hud(output_frame, self.is_recording, self.current_profile_name, self.current_bg_name, self.current_view_mode)
-
-                if self.is_recording and self.record_running:
-                    if not self.record_queue.full():
-                        self.record_queue.put(output_frame.copy())
+                if self.is_recording:
+                    cv2.putText(output_frame, "REC", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                    self.recorder.push_frame(output_frame)
 
                 self.frame_ready.emit(output_frame)
 
-        self.record_running = False
-        if self.record_thread is not None:
-            self.record_thread.join()
+        if self.recorder is not None:
+            self.recorder.stop()
         self.finished.emit()
-        print("工作线程：已停止。")
-
-    def _record_worker(self, fps, monitor_width, monitor_height):
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        video_writer = cv2.VideoWriter("output.mp4", fourcc, fps, (monitor_width, monitor_height))
-        print("录像线程：开始录制...")
-
-        while self.record_running or not self.record_queue.empty():
-            try:
-                frame = self.record_queue.get(timeout=0.5)
-                video_writer.write(frame)
-            except queue.Empty:
-                continue
-
-        video_writer.release()
-        print("录像线程：停止录制。")
 
     def stop(self):
         self._is_running = False
-        self.record_running = False
-        if self.record_thread is not None:
-            self.record_thread.join()

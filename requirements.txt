@@ -1,5 +1,5 @@
-ultralytics
-mss
-opencv-python
-numpy
-PyQt6
+PyQt6==6.11.0
+numpy==2.4.4
+opencv-python==4.13.0.92
+mss==10.1.0
+ultralytics==8.4.33
