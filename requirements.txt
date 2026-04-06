@@ -1,0 +1,5 @@
+ultralytics
+mss
+opencv-python
+numpy
+PyQt6
