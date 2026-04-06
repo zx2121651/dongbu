@@ -3,3 +3,4 @@ numpy==2.4.4
 opencv-python==4.13.0.92
 mss==10.1.0
 ultralytics==8.4.33
+mediapipe>=0.10.0
