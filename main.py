@@ -20,6 +20,7 @@ class MainWindow(QMainWindow):
     min_cutoff_changed = pyqtSignal(float)
     beta_changed = pyqtSignal(float)
     recording_changed = pyqtSignal(bool)
+    export_motion_data_changed = pyqtSignal(bool)
 
     def __init__(self):
         super().__init__()
@@ -97,6 +98,7 @@ class MainWindow(QMainWindow):
         self.min_cutoff_changed.connect(self.worker.set_min_cutoff)
         self.beta_changed.connect(self.worker.set_beta)
         self.recording_changed.connect(self.worker.set_recording)
+        self.export_motion_data_changed.connect(self.worker.set_export_motion_data)
 
         self.thread.start()
 
@@ -107,6 +109,7 @@ class MainWindow(QMainWindow):
         self.threshold_changed.emit(self.user_settings.get("threshold", 50) / 100.0)
         self.min_cutoff_changed.emit(self.user_settings.get("min_cutoff", 100) / 100.0)
         self.beta_changed.emit(self.user_settings.get("beta", 70) / 100.0)
+        self.export_motion_data_changed.emit(self.user_settings.get("export_motion_data", False))
 
     # --- Callbacks ---
     def on_model_select(self, model_name):
@@ -126,6 +129,10 @@ class MainWindow(QMainWindow):
         self.user_settings["background"] = bg_name
         self.settings_panel.custom_bg_btn.setVisible(bg_name == "custom")
         self.background_changed.emit(bg_name)
+
+    def on_export_data_toggle(self, checked):
+        self.user_settings["export_motion_data"] = checked
+        self.export_motion_data_changed.emit(checked)
 
     def toggle_recording(self):
         self.is_recording = not self.is_recording

@@ -16,6 +16,12 @@ class PreviewPanel(QWidget):
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.preview_label)
 
+        from PyQt6.QtWidgets import QCheckBox
+        self.export_data_cb = QCheckBox("同时导出 3D 动作数据 (.json)")
+        self.export_data_cb.setChecked(self.main.user_settings.get("export_motion_data", False))
+        self.export_data_cb.toggled.connect(self.main.on_export_data_toggle)
+        layout.addWidget(self.export_data_cb)
+
         self.record_btn = QPushButton("开始录制")
         self.record_btn.clicked.connect(self.main.toggle_recording)
         layout.addWidget(self.record_btn)
