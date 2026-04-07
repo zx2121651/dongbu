@@ -27,7 +27,8 @@ class SettingsPanel(QWidget):
     def create_capture_group(self, group):
         layout = QVBoxLayout(group)
         model_combo = QComboBox()
-        model_combo.addItem("单人捕捉 (MediaPipe)", "mediapipe-pose")
+        model_combo.addItem("单人基础捕捉 (MP Pose)", "mediapipe-pose")
+        model_combo.addItem("单人精细捕捉 (MP Holistic)", "mediapipe-holistic")
         model_combo.addItem("多人捕捉 (YOLO26-N)", "yolo26n-pose.pt")
         model_combo.addItem("多人捕捉 (YOLO26-S)", "yolo26s-pose.pt")
         model_combo.addItem("多人捕捉 (YOLO11)", "yolo11n-pose.pt")

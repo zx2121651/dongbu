@@ -35,12 +35,17 @@ class CaptureWorker(QObject):
         self.custom_bg_reload_requested = False
 
         self.pose_filters = {}
+        self.mp_holistic = None
         if "yolo" in self.model_name:
             self.model = YOLO(self.model_name)
             self.mp_pose = None
         elif self.model_name == "mediapipe-pose":
             self.model = None
             self.mp_pose = mp.solutions.pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+        elif self.model_name == "mediapipe-holistic":
+            self.model = None
+            self.mp_pose = None
+            self.mp_holistic = mp.solutions.holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5)
         self.recorder = None
 
     @pyqtSlot(str)
@@ -117,15 +122,26 @@ class CaptureWorker(QObject):
                         # Pad with z=0.0 since YOLO 2D doesn't natively output Z
                         all_keypoints = np.zeros((kpts_yolo.shape[0], kpts_yolo.shape[1], 4), dtype=np.float32)
                         all_keypoints[:, :, :3] = kpts_yolo[:, :, :3]
-                elif self.mp_pose is not None:
+                elif self.mp_pose is not None or self.mp_holistic is not None:
                     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-                    results = self.mp_pose.process(img_rgb)
+                    if self.mp_pose is not None:
+                        results = self.mp_pose.process(img_rgb)
+                    else:
+                        results = self.mp_holistic.process(img_rgb)
 
                     if self.current_view_mode == "Debug View":
-                        if results.pose_landmarks:
+                        if getattr(results, 'pose_landmarks', None):
                             mp.solutions.drawing_utils.draw_landmarks(output_frame, results.pose_landmarks, mp.solutions.pose.POSE_CONNECTIONS)
+                        if getattr(results, 'face_landmarks', None):
+                            mp.solutions.drawing_utils.draw_landmarks(output_frame, results.face_landmarks, mp.solutions.holistic.FACEMESH_TESSELATION,
+                                                                      mp.solutions.drawing_utils.DrawingSpec(color=(80,110,10), thickness=1, circle_radius=1),
+                                                                      mp.solutions.drawing_utils.DrawingSpec(color=(80,256,121), thickness=1, circle_radius=1))
+                        if getattr(results, 'left_hand_landmarks', None):
+                            mp.solutions.drawing_utils.draw_landmarks(output_frame, results.left_hand_landmarks, mp.solutions.holistic.HAND_CONNECTIONS)
+                        if getattr(results, 'right_hand_landmarks', None):
+                            mp.solutions.drawing_utils.draw_landmarks(output_frame, results.right_hand_landmarks, mp.solutions.holistic.HAND_CONNECTIONS)
 
-                    if results.pose_landmarks:
+                    if getattr(results, 'pose_landmarks', None):
                         track_ids = [0] # MP only supports single person by default
 
                         # Map MediaPipe landmarks to YOLO format
@@ -156,6 +172,17 @@ class CaptureWorker(QObject):
                         for mp_idx, yolo_idx in mp_to_yolo_map.items():
                             lm = landmarks[mp_idx]
                             mapped_kpts[yolo_idx] = [lm.x * monitor_width, lm.y * monitor_height, lm.visibility, lm.z * monitor_width]
+
+                        # If holistic, extract hands (extend the 17 kpts to 17 + 21 + 21 = 59 kpts for 3D export)
+                        if self.mp_holistic is not None:
+                            hands_kpts = np.zeros((42, 4), dtype=np.float32)
+                            if getattr(results, 'left_hand_landmarks', None):
+                                for i, lm in enumerate(results.left_hand_landmarks.landmark):
+                                    hands_kpts[i] = [lm.x * monitor_width, lm.y * monitor_height, 1.0, lm.z * monitor_width]
+                            if getattr(results, 'right_hand_landmarks', None):
+                                for i, lm in enumerate(results.right_hand_landmarks.landmark):
+                                    hands_kpts[21 + i] = [lm.x * monitor_width, lm.y * monitor_height, 1.0, lm.z * monitor_width]
+                            mapped_kpts = np.vstack((mapped_kpts, hands_kpts))
 
                         all_keypoints = [mapped_kpts]
 
