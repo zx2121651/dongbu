@@ -70,7 +70,8 @@ class SettingsPanel(QWidget):
         self.bg_combo.setCurrentText(self.settings.get("background", "black"))
         self.bg_combo.currentTextChanged.connect(self.main.on_background_select)
 
-        self.custom_bg_btn = QPushButton("选择自定义背景")
+        self.custom_bg_btn = QPushButton("自定义背景图设置...")
+        self.custom_bg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.custom_bg_btn.setVisible(self.bg_combo.currentText() == "custom")
         self.custom_bg_btn.clicked.connect(self.select_custom_bg)
 

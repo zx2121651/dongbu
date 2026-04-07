@@ -5,7 +5,8 @@ import cv2
 import numpy as np
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QLabel, QHBoxLayout, QVBoxLayout, QScrollArea
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtGui import QImage, QPixmap, QIcon
+from src.gui.style import MODERN_DARK_STYLE
 
 from src.core.capture_worker import CaptureWorker
 from src.gui.components.settings_panel import SettingsPanel
@@ -32,13 +33,19 @@ class MainWindow(QMainWindow):
         self.thread = None
         self.worker = None
 
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        self.main_layout = QHBoxLayout(central_widget)
+        self.setStyleSheet(MODERN_DARK_STYLE)
 
-        self.video_label = QLabel("正在启动...")
+        central_widget = QWidget()
+        central_widget.setObjectName("central_widget")
+        self.setCentralWidget(central_widget)
+
+        self.main_layout = QHBoxLayout(central_widget)
+        self.main_layout.setContentsMargins(16, 16, 16, 16)
+        self.main_layout.setSpacing(16)
+
+        self.video_label = QLabel("等待捕捉画面...")
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.video_label.setStyleSheet("background-color: black; color: white; font-size: 24px;")
+        self.video_label.setStyleSheet("background-color: #111115; color: #555560; font-size: 20px; font-weight: bold; border-radius: 10px;")
         self.main_layout.addWidget(self.video_label, 1)
 
         self.setup_sidebar()
@@ -138,10 +145,12 @@ class MainWindow(QMainWindow):
         self.is_recording = not self.is_recording
         self.recording_changed.emit(self.is_recording)
         if self.is_recording:
-            self.preview_panel.record_btn.setText("停止录制")
-            self.preview_panel.record_btn.setStyleSheet("background-color: red; color: white;")
+            self.preview_panel.record_btn.setText("⏹ 停止并保存")
+            self.preview_panel.record_btn.setObjectName("danger_btn")
+            self.preview_panel.record_btn.setStyleSheet("") # Clear inline to let QSS take over
         else:
-            self.preview_panel.record_btn.setText("开始录制")
+            self.preview_panel.record_btn.setText("🔴 开始录制视频与动作")
+            self.preview_panel.record_btn.setObjectName("primary_btn")
             self.preview_panel.record_btn.setStyleSheet("")
 
     @pyqtSlot(np.ndarray)

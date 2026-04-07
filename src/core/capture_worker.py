@@ -88,7 +88,10 @@ class CaptureWorker(QObject):
             self.motion_exporter = MotionExporter()
             frame_idx = 0
 
+            from PyQt6.QtWidgets import QApplication
             while self._is_running:
+                QApplication.processEvents()
+
                 if self.custom_bg_reload_requested:
                     if os.path.exists("background.jpg"):
                         new_bg = cv2.imread("background.jpg")
@@ -203,7 +206,7 @@ class CaptureWorker(QObject):
                                 # Init filters for x, y, z (if z exists, else default 0)
                                 self.pose_filters[track_id] = [OneEuroFilter(t0, p[0], min_cutoff=self.min_cutoff, beta=self.beta) for p in person_keypoints] + \
                                                               [OneEuroFilter(t0, p[1], min_cutoff=self.min_cutoff, beta=self.beta) for p in person_keypoints] + \
-                                                              [OneEuroFilter(t0, p[2] if len(p) > 3 else 0.0, min_cutoff=self.min_cutoff, beta=self.beta) for p in person_keypoints]
+                                                              [OneEuroFilter(t0, p[3] if len(p) > 3 else 0.0, min_cutoff=self.min_cutoff, beta=self.beta) for p in person_keypoints]
 
                             smoothed_kpts = np.zeros_like(person_keypoints)
                             num_kpts = len(person_keypoints)
@@ -231,14 +234,13 @@ class CaptureWorker(QObject):
                         for t_id in track_ids:
                             t_id = int(t_id)
                             if t_id in self.pose_filters:
-                                skpts = np.zeros((17, 4), dtype=np.float32)
-                                for j in range(17):
+                                num_pts = len(self.pose_filters[t_id]) // 3
+                                skpts = np.zeros((num_pts, 4), dtype=np.float32)
+                                for j in range(num_pts):
                                     skpts[j, 0] = self.pose_filters[t_id][j].x_prev
-                                    skpts[j, 1] = self.pose_filters[t_id][j + 17].x_prev
-                                    # We don't filter visibility, just copy it back
-                                    skpts[j, 2] = 1.0 # placeholder if you want raw
-                                    if len(self.pose_filters[t_id]) > 34:
-                                        skpts[j, 3] = self.pose_filters[t_id][j + 34].x_prev
+                                    skpts[j, 1] = self.pose_filters[t_id][j + num_pts].x_prev
+                                    skpts[j, 2] = 1.0
+                                    skpts[j, 3] = self.pose_filters[t_id][j + 2 * num_pts].x_prev
                                 smoothed_all_kpts.append(skpts)
                         if smoothed_all_kpts:
                             self.motion_exporter.push_frame(frame_idx, track_ids, smoothed_all_kpts)

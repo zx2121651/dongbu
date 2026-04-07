@@ -22,7 +22,10 @@ class PreviewPanel(QWidget):
         self.export_data_cb.toggled.connect(self.main.on_export_data_toggle)
         layout.addWidget(self.export_data_cb)
 
-        self.record_btn = QPushButton("开始录制")
+        self.record_btn = QPushButton("🔴 开始录制视频与动作")
+        self.record_btn.setObjectName("primary_btn")
+        self.record_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.record_btn.setMinimumHeight(40)
         self.record_btn.clicked.connect(self.main.toggle_recording)
         layout.addWidget(self.record_btn)
 
